@@ -96,6 +96,47 @@ fn try_recv_pong(sock: &net::UdpSocket) -> Result<()> {
 }
 
 #[test]
+fn udp_ipv4_broadcast() -> Result {
+    let mut sim = Builder::new().ip_version(IpVersion::V4).build();
+
+    let non_broadcast_port = 8000;
+    let broadcast_port = 9000;
+    sim.client("server-non-broadcast-port", async move {
+        let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, non_broadcast_port)).await?;
+
+        let mut buf = [0; 1];
+        let is_timed_out = timeout(Duration::from_secs(1), socket.recv_from(&mut buf))
+            .await
+            .is_err();
+        assert!(is_timed_out);
+
+        Ok(())
+    });
+    for server_index in 0..3 {
+        sim.client(format!("server-{server_index}"), async move {
+            let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, broadcast_port)).await?;
+
+            let mut buf = [0; 1];
+            socket.recv_from(&mut buf).await?;
+            assert_eq!([1], buf);
+
+            Ok(())
+        });
+    }
+    sim.client("client", async move {
+        let dst = (Ipv4Addr::BROADCAST, broadcast_port);
+        let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).await?;
+        socket.set_broadcast(true)?;
+
+        let _ = socket.send_to(&[1], dst).await?;
+
+        Ok(())
+    });
+
+    sim.run()
+}
+
+#[test]
 fn udp_ipv4_multicast() -> Result {
     let mut sim = Builder::new()
         .tick_duration(Duration::from_millis(50))
